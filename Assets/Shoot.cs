@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
+using System;
 
 public struct RoundStatus {
     public bool isTargetSet, isPowerSet;
@@ -17,8 +18,35 @@ public struct RoundStatus {
     }
 }
 
+public static class ScrollbarExtension {
+    public static float calculatePowerSetting(this Scrollbar sb) {
+        return sb.value * 400;
+    }
+}
+
+public static class CameraExtension {
+    public static Vector3 getClickedWorldPosition(this Camera cam, float posX, float posY) {
+        return cam.ScreenToWorldPoint(new Vector3(posX, posY, 10));
+    }
+}
+
+public static class ArrayExtension {
+    public static T[] map<T>(this T[] from, Func<T, T> action) {
+        T[] result = from.Clone() as T[];
+        for (var i = 0; i < from.Length -1; i++) {
+            result[i] = action(from[i]);
+        }
+        return result;
+    }
+
+    public static List<T> map<T>(this List<T> from, Func<T, T> action) {
+        T[] result = from.ToArray().map(action);
+        return new List<T>(result);
+    }
+}
+
 public class Shoot : MonoBehaviour {
-    public ArrayList ballCloneList;
+    public List<GameObject> ballCloneList;
     public static int maxShoot = 5;
     public int noShot = 0;
     public static float startValue = 1000;
@@ -37,24 +65,24 @@ public class Shoot : MonoBehaviour {
         Physics.gravity = new Vector3(0, -20, 0);
         roundStatus = new RoundStatus(false, false, Vector3.zero, 0);
         powerSetting.onValueChanged.AddListener(delegate { powerValueChangeCheck(); });
-        powerCount.text = calculatePowerSetting().ToString();
+        powerCount.text = powerSetting.calculatePowerSetting().ToString();
         prompt.text = "Select Target";
         shoot.gameObject.SetActive(false);
         shoot.onClick.AddListener(delegate { shootClicked(); });
         replay.onClick.AddListener(delegate { replayClicked(); });
-        ballCloneList = new ArrayList();
+        ballCloneList = new List<GameObject>();
         updateShotCount();
     }
 
     // Invoked when the value of the slider changes.
     public void powerValueChangeCheck() {
         if (canShoot()) {
-            setTargetData();
+            roundStatus = setTargetData(roundStatus, () => { doShoot(); });
             shoot.gameObject.SetActive(true);
             prompt.text = "";
             EventSystem.current.SetSelectedGameObject(null);
         }
-        powerCount.text = calculatePowerSetting().ToString();
+        powerCount.text = powerSetting.calculatePowerSetting().ToString();
     }
 
     public void shootClicked() {
@@ -72,9 +100,10 @@ public class Shoot : MonoBehaviour {
         target.gameObject.SetActive(false);
         powerSetting.value = 0;
         noShot = 0;
-        foreach (var ball in ballCloneList) {
-            Destroy(ball as GameObject);
-        }
+        ballCloneList.ForEach(
+            (ball) => {
+                Destroy(ball);
+            });
         ballCloneList.Clear();
     }
 
@@ -86,7 +115,7 @@ public class Shoot : MonoBehaviour {
             if (!isRoundStatusComplete(roundStatus)) {
                 if (roundStatus.isTargetSet) {
                     roundStatus.isPowerSet = true;
-                    roundStatus.powerValue = calculatePowerSetting();
+                    roundStatus.powerValue = powerSetting.calculatePowerSetting();
                     prompt.text = "";
                     shoot.gameObject.SetActive(true);
                 } else {
@@ -95,7 +124,7 @@ public class Shoot : MonoBehaviour {
                     position.z = 10;
                     roundStatus.targetCoordinates = position;
                     prompt.text = "Set Power";
-                    setTargetPosition(getCurrentMousePosition());
+                    target = setTargetPosition(getCurrentMousePosition(Input.mousePosition.x, Input.mousePosition.y), target);
                 }
             } else {
                 prompt.text = "";
@@ -103,16 +132,18 @@ public class Shoot : MonoBehaviour {
             }
         }
 
-        checkRoundComplete();
+        Action completeAction = checkRoundComplete(canShoot());
+        completeAction();
     }
 
-    Vector3 getCurrentMousePosition() {
-        return new Vector3(Input.mousePosition.x, Input.mousePosition.y, 10);
+    Vector3 getCurrentMousePosition(float positionX, float positionY) {
+        return new Vector3(positionX, positionY, 10);
     }
 
-    void setTargetPosition(Vector3 pos) {
-        target.transform.position = pos;
-        target.gameObject.SetActive(true);
+    RawImage setTargetPosition(Vector3 pos, RawImage t) {
+        t.transform.position = pos;
+        t.gameObject.SetActive(true);
+        return t;
     }
 
     Vector3 getClickedWorldPosition() {
@@ -145,9 +176,9 @@ public class Shoot : MonoBehaviour {
         target.gameObject.SetActive(false);
     }
 
-    float calculatePowerSetting() {
+    /*float calculatePowerSetting() {
         return powerSetting.value * 400;
-    }
+    }*/
 
     bool canShoot() {
         return noShot < maxShoot;
@@ -157,24 +188,25 @@ public class Shoot : MonoBehaviour {
         shotCount.text = "Shots Left: " + (maxShoot - noShot).ToString();
     }
 
-    void checkRoundComplete() {
-        if (canShoot()) {
-            replay.gameObject.SetActive(false);
-        }
-        else {
-            prompt.text = "Game Over";
-            replay.gameObject.SetActive(true);
-        }
-        updateShotCount();
+    Action checkRoundComplete(bool canContinue) {
+        return () => {
+            replay.gameObject.SetActive(!canContinue);
+            if (!canContinue) {
+                prompt.text = "Game Over";
+            }
+            updateShotCount();
+        };
     }
 
-    void setTargetData(bool isShoot = false) {
-        if (roundStatus.isTargetSet) {
-            roundStatus.isPowerSet = true;
-            roundStatus.powerValue = calculatePowerSetting();
+    RoundStatus setTargetData(RoundStatus status, Action onShoot, bool isShoot = false) {
+        RoundStatus s = new RoundStatus(status.isTargetSet, status.isPowerSet, status.targetCoordinates, status.powerValue);
+        if (status.isTargetSet) {
+            s.isPowerSet = true;
+            s.powerValue = powerSetting.calculatePowerSetting();
             if (isShoot) {
-                doShoot();
+                onShoot();
             }
         }
+        return s;
     }
 }
